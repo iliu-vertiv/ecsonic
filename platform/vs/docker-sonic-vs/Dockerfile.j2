@@ -1,0 +1,154 @@
+FROM docker-config-engine-buster
+
+ARG docker_container_name
+RUN [ -f /etc/rsyslog.conf ] && sed -ri "s/%syslogtag%/$docker_container_name#%syslogtag%/;" /etc/rsyslog.conf
+
+## Make apt-get non-interactive
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get install -y gnupg
+COPY ["sonic-dev.gpg.key", "/etc/apt/"]
+RUN apt-key add /etc/apt/sonic-dev.gpg.key
+RUN echo "deb http://packages.microsoft.com/repos/sonic-dev/ jessie main" >> /etc/apt/sources.list
+RUN apt-get update
+
+RUN apt-get install -y net-tools \
+                       redis-server=5:6.0.6-1~bpo10+1 \
+                       arping \
+                       ndisc6 \
+                       ethtool \
+                       tcpdump \
+                       ifupdown \
+                       bridge-utils \
+                       python-ply \
+                       libqt5core5a \
+                       libqt5network5 \
+                       libboost-program-options1.71.0 \
+                       libboost-system1.71.0 \
+                       libboost-thread1.71.0 \
+                       libgmp10 \
+                       libjudydebian1 \
+                       openssh-client \
+                       openssh-server \
+                       libc-ares2 \
+                       iproute2 \
+                       grub2-common \
+                       python-click \
+                       python-natsort \
+                       python-tabulate \
+                       bash-completion \
+                       libelf1 \
+                       libmnl0 \
+                       logrotate \
+                       apt-utils \
+                       psmisc \
+                       tcpdump \
+                       python-scapy \
+                       conntrack \
+                       iptables \
+                       python3-pip \
+                       jq
+
+RUN pip install setuptools
+RUN pip3 install setuptools
+RUN pip install py2_ipaddress
+RUN pip install six
+RUN pip install pyroute2==0.5.3 netifaces==0.10.7
+RUN pip install monotonic==1.5
+RUN pip install urllib3
+RUN pip install requests
+RUN pip install crontab
+
+# Install dependencies for Dynamic Port Breakout
+RUN pip install xmltodict==0.12.0
+RUN pip install jsondiff==1.2.0
+RUN pip install ijson==2.6.1
+
+{% if docker_sonic_vs_debs.strip() -%}
+# Copy locally-built Debian package dependencies
+{%- for deb in docker_sonic_vs_debs.split(' ') %}
+COPY debs/{{ deb }} /debs/
+{%- endfor %}
+
+# Install locally-built Debian packages and implicitly install their dependencies
+{%- for deb in docker_sonic_vs_debs.split(' ') %}
+RUN dpkg_apt() { [ -f $1 ] && { dpkg -i $1 || apt-get -y install -f; } || return 1; }; dpkg_apt /debs/{{ deb }}
+{%- endfor %}
+{%- endif %}
+
+{% if docker_sonic_vs_pydebs.strip() -%}
+# Copy locally-built Debian package dependencies
+{%- for deb in docker_sonic_vs_pydebs.split(' ') %}
+COPY python-debs/{{ deb }} /debs/
+{%- endfor %}
+
+# Install locally-built Debian packages and implicitly install their dependencies
+{%- for deb in docker_sonic_vs_pydebs.split(' ') %}
+RUN dpkg_apt() { [ -f $1 ] && { dpkg -i $1 || apt-get -y install -f; } || return 1; }; dpkg_apt /debs/{{ deb }}
+{%- endfor %}
+{%- endif %}
+
+{% if docker_sonic_vs_whls.strip() %}
+# copy all whl PKGs first,
+{% for whl in docker_sonic_vs_whls.split(' ') -%}
+COPY python-wheels/{{ whl }}  python-wheels/
+{% endfor %}
+
+# install PKGs after copying all PKGs to avoid dependency failure
+# use py3 to find python3 package, which is forced by wheel as of now
+{%- for whl in docker_sonic_vs_whls.split(' ') %}
+{%- if 'py3' in whl %}
+RUN pip3 install python-wheels/{{ whl }}
+{% else -%}
+RUN pip install python-wheels/{{ whl }}
+{%- endif %}
+{%- endfor %}
+{% endif %}
+
+# Clean up
+RUN apt-get clean -y
+RUN apt-get autoclean -y
+RUN apt-get autoremove -y
+RUN rm -rf /debs ~/.cache
+
+RUN sed -ri 's/^(save .*$)/# \1/g;                                                      \
+             s/^daemonize yes$/daemonize no/;                                           \
+             s/^logfile .*$/logfile ""/;                                                \
+             s/^# syslog-enabled no$/syslog-enabled no/;                                \
+             s/^# unixsocket/unixsocket/;                                               \
+             s/notify-keyspace-events ""/notify-keyspace-events AKE/;                   \
+             s/redis-server.sock/redis.sock/g;                                          \
+             s/^client-output-buffer-limit pubsub [0-9]+mb [0-9]+mb [0-9]+/client-output-buffer-limit pubsub 0 0 0/ \
+            ' /etc/redis/redis.conf
+
+COPY ["50-default.conf", "/etc/rsyslog.d/"]
+COPY ["start.sh", "orchagent.sh", "files/remove_chassisdb_config", "/usr/bin/"]
+COPY ["supervisord.conf", "/etc/supervisor/conf.d/"]
+COPY ["files/configdb-load.sh", "/usr/bin/"]
+COPY ["files/arp_update", "/usr/bin/"]
+COPY ["files/buffers_config.j2", "files/qos_config.j2", "/usr/share/sonic/templates/"]
+COPY ["files/sonic_version.yml", "/etc/sonic/"]
+COPY ["init_cfg.json", "/etc/sonic/"]
+COPY ["database_config.json", "/etc/default/sonic-db/"]
+COPY ["hostname.j2", "/usr/share/sonic/templates/"]
+COPY ["default_chassis_cfg.json", "/etc/default/sonic-db/"]
+COPY ["chassis_db.py", "/usr/bin/"]
+
+COPY ["platform.json", "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/"]
+COPY ["hwsku.json", "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000/"]
+COPY ["platform.json", "/usr/share/sonic/platform/"]
+
+# Workaround the tcpdump issue
+RUN mv /usr/sbin/tcpdump /usr/bin/tcpdump
+
+RUN echo "docker-sonic-vs" > /etc/hostname
+RUN mkdir -p /etc/quagga
+RUN touch /etc/quagga/zebra.conf
+
+# disable integrated vtysh config
+RUN rm /etc/frr/frr.conf
+
+# Create /var/warmboot/teamd folder for teammgrd
+RUN mkdir -p /var/warmboot/teamd
+
+ENTRYPOINT ["/usr/bin/supervisord"]
