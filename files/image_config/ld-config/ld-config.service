@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy linux ld library for Yocto deb packages
+
+[Service]
+Type=oneshot
+ExecStart=cp /lib64/ld-linux-x86-64.so.2 /lib/.
+ExecStartPost=/bin/systemctl disable ld-config.service
+
+[Install]
+WantedBy=multi-user.target

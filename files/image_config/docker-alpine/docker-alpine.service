@@ -1,0 +1,10 @@
+[Unit]
+Description=Run docker-alpine
+After=docker.service
+
+[Service]
+Type=simple
+ExecStart=docker run --net=host --privileged -t docker-alpine
+
+[Install]
+WantedBy=multi-user.target

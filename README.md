@@ -3,7 +3,7 @@
 
 # sonic-buildimage
 
-Forked from []() at 8/30/2020.
+Forked from [https://github.com/Azure/sonic-buildimage](https://github.com/Azure/sonic-buildimage) at 8/30/2020.
 
 ## Build SONiC Switch Images
 
@@ -34,7 +34,7 @@ Please refer to [SONiC roadmap](https://github.com/Azure/SONiC/wiki/Sonic-Roadma
 ## Clone or fetch the code repository with all git submodules
 To clone the code repository recursively, assuming git version 1.9 or newer:
 
-    git clone https://github.com/Azure/sonic-buildimage.git
+    git clone https://github.com/iliu-vertiv/ecsonic
 
 ## Usage
 
